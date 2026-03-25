@@ -623,7 +623,51 @@
         return;
       }
       if (!window.showDirectoryPicker) {
-        alert("Your browser lacks the FileSystem Access API. Please use Chrome or Edge.");
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.webkitdirectory = true;
+        input.directory = true;
+        input.multiple = true;
+
+        input.onchange = async (e) => {
+          const fileList = e.target.files;
+          if (!fileList || fileList.length === 0) return;
+
+          elIntro.style.opacity = '0';
+          setTimeout(() => elIntro.style.display = 'none', 500);
+          elLoading.classList.add('active');
+          elLoadingText.textContent = "Scanning directory (Firefox fallback)...";
+
+          const files = [];
+          for (let i = 0; i < fileList.length; i++) {
+            const file = fileList[i];
+            if (file.name.endsWith('.md')) {
+              files.push({
+                name: file.name.replace(/\.md$/, ''),
+                path: file.webkitRelativePath,
+                handle: { getFile: async () => file } // seamless polyfill map
+              });
+            }
+          }
+
+          if (files.length === 0) {
+            alert("No .md files found in this directory.");
+            elLoading.classList.remove('active');
+            elIntro.style.display = 'flex';
+            elIntro.style.opacity = '1';
+            return;
+          }
+
+          elLoadingText.textContent = `Parsing ${files.length} files...`;
+          await processFiles(files);
+
+          elLoadingText.textContent = `Building 3D Graph...`;
+          buildGraph();
+
+          elLoading.classList.remove('active');
+          elHud.classList.remove('hidden');
+        };
+        input.click();
         return;
       }
       try {
