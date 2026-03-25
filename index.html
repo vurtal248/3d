@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>3D Markdown Knowledge Graph</title>
+  <style>
+    :root {
+      --bg: #08080A;
+      --text: #F1F1F4;
+      --accent: #4A9EFF;
+      --dormant: #2A2A35;
+      --glass-bg: rgba(20, 20, 25, 0.75);
+      --glass-border: rgba(255, 255, 255, 0.1);
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', system-ui, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap');
+
+    #canvas-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    .hud {
+      position: absolute;
+      top: 1.5rem;
+      right: 1.5rem;
+      z-index: 10;
+      background: var(--glass-bg);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 200px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .hud.hidden {
+      display: none;
+    }
+
+    .hud__stat {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+
+    .hud__val {
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .btn {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .btn--primary {
+      background: var(--accent);
+      color: #000;
+      border: none;
+    }
+
+    .btn--primary:hover {
+      background: #5db0ff;
+    }
+
+    #intro {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      z-index: 20;
+      transition: opacity 0.5s ease;
+    }
+
+    #intro h1 {
+      font-size: clamp(2rem, 4vw, 3rem);
+      margin-bottom: 0.5rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    #intro p {
+      color: #888;
+      max-width: 400px;
+      text-align: center;
+      margin-bottom: 2rem;
+      line-height: 1.5;
+    }
+
+    #loading {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      z-index: 15;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    #loading.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(74, 158, 255, 0.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1rem;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .node-label {
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 12px;
+      background: var(--glass-bg);
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--glass-border);
+      pointer-events: auto;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      white-space: nowrap;
+      transform: translate3d(0, 0, 0) scale(0.8);
+    }
+
+    .node-label.visible {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+
+    .node-label:hover {
+      border-color: var(--accent);
+      z-index: 1000 !important;
+    }
+
+    .node-label.selected {
+      border-color: var(--accent);
+      background: rgba(74, 158, 255, 0.15);
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1.1);
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/",
+        "d3-force-3d": "https://cdn.jsdelivr.net/npm/d3-force-3d@3.0.5/+esm"
+      }
+    }
+  </script>
+</head>
+
+<body>
+
+  <div id="intro">
+    <h1>Knowledge Void</h1>
+    <p>A 3D force-directed graph visualization of your interconnected Markdown notes.</p>
+    <button class="btn btn--primary" id="btn-start">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </svg>
+      Choose Folder
+    </button>
+  </div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div id="loading-text">Scanning files...</div>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <div class="hud hidden" id="hud">
+    <div class="hud__stat">
+      <span>Nodes</span>
+      <span class="hud__val" id="stat-nodes">0</span>
+    </div>
+    <div class="hud__stat">
+      <span>Edges</span>
+      <span class="hud__val" id="stat-edges">0</span>
+    </div>
+    <div class="hud__stat" style="flex-direction: column; align-items: flex-start; gap: 0.25rem;">
+      <span style="font-size: 0.75rem; color: #888;">Selected</span>
+      <span class="hud__val" id="stat-selected" style="font-size: 0.9rem; word-break: break-all;">None</span>
+    </div>
+    <div style="height: 1px; background: var(--glass-border); margin: 0.5rem 0;"></div>
+    <button class="btn" id="btn-reset">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+        <path d="M3 3v5h5"></path>
+      </svg>
+      Reset View
+    </button>
+    <button class="btn" id="btn-new">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </svg>
+      New Folder
+    </button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+    import { forceSimulation, forceLink, forceManyBody, forceCenter } from 'd3-force-3d';
+
+    const state = { nodes: [], links: [], selectedNode: null };
+
+    const elIntro = document.getElementById('intro');
+    const elLoading = document.getElementById('loading');
+    const elLoadingText = document.getElementById('loading-text');
+    const elHud = document.getElementById('hud');
+    const container = document.getElementById('canvas-container');
+    const elStart = document.getElementById('btn-start');
+    const elNew = document.getElementById('btn-new');
+    const elReset = document.getElementById('btn-reset');
+
+    async function scanDirectory(dirHandle) {
+      const files = [];
+      async function walk(handle, path) {
+        for await (const entry of handle.values()) {
+          if (entry.kind === 'file' && entry.name.endsWith('.md')) {
+            files.push({ handle: entry, path: `${path}/${entry.name}`, name: entry.name.replace(/\.md$/, '') });
+          } else if (entry.kind === 'directory') {
+            await walk(entry, `${path}/${entry.name}`);
+          }
+        }
+      }
+      await walk(dirHandle, '');
+      return files;
+    }
+
+    async function processFiles(files) {
+      const nodeMap = new Map();
+      files.forEach(f => {
+        nodeMap.set(f.name.toLowerCase(), { id: f.name, _file: f, links: [], degree: 0, dangling: false });
+      });
+
+      for (const f of files) {
+        const wikiRegex = /\[\[([^|\]]+)(?:\|[^\]]+)?\]\]/g;
+        const mdLocalRegex = /\[.*?\]\(([^)]+)\)/g;
+        const fileObj = await f.handle.getFile();
+        const text = await fileObj.text();
+        const sourceLower = f.name.toLowerCase();
+
+        let match;
+        while ((match = wikiRegex.exec(text)) !== null) {
+          nodeMap.get(sourceLower).links.push(match[1].trim().replace(/\.md$/, ''));
+        }
+        while ((match = mdLocalRegex.exec(text)) !== null) {
+          let p = match[1].split('/').pop().replace(/\.md$/, '');
+          nodeMap.get(sourceLower).links.push(p);
+        }
+      }
+
+      // Identify dangling nodes
+      nodeMap.forEach((node, key) => {
+        node.links.forEach(t => {
+          const targetLower = t.toLowerCase();
+          if (!nodeMap.has(targetLower)) {
+            nodeMap.set(targetLower, { id: t, _file: null, links: [], degree: 0, dangling: true });
+          }
+        });
+      });
+
+      state.nodes = [];
+      state.links = [];
+
+      nodeMap.forEach((node, key) => {
+        state.nodes.push({ id: node.id, degree: 0, dangling: node.dangling });
+      });
+
+      nodeMap.forEach((node, key) => {
+        node.links.forEach(t => {
+          const targetLower = t.toLowerCase();
+          const targetNode = nodeMap.get(targetLower);
+          state.links.push({ source: node.id, target: targetNode.id, dangling: targetNode.dangling });
+        });
+      });
+
+      state.links.forEach(l => {
+        const s = state.nodes.find(n => n.id === l.source);
+        const t = state.nodes.find(n => n.id === l.target);
+        if (s) s.degree++;
+        if (t) t.degree++;
+      });
+    }
+
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x08080A, 0.002);
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+    camera.position.set(0, 0, 400);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x08080A);
+    container.appendChild(renderer.domElement);
+
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0px';
+    labelRenderer.domElement.style.pointerEvents = 'none';
+    container.appendChild(labelRenderer.domElement);
+
+    const renderScene = new RenderPass(scene, camera);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.4, 0.85);
+    bloomPass.threshold = 0.2;
+    bloomPass.strength = 1.0;
+    bloomPass.radius = 0.5;
+    const composer = new EffectComposer(renderer);
+    composer.addPass(renderScene);
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.enableKeys = false; // Strictly enforce no keyboard pan/orbit
+    ['keydown', 'keyup', 'keypress'].forEach(evt => window.addEventListener(evt, e => e.stopPropagation(), true));
+
+    // Interaction states
+    let hoveredMesh = null;
+    let nodeGroup = new THREE.Group();
+    scene.add(nodeGroup);
+    let linkLines, simulation;
+    let nodeObjects = new Map();
+    let labelElements = new Map();
+    let simulationData = { nodes: [], links: [] };
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    const matActive = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x4A9EFF, emissiveIntensity: 1.0, roughness: 0.2, metalness: 0.8 });
+    const matDormant = new THREE.MeshStandardMaterial({ color: 0x555555, emissive: 0x222222, emissiveIntensity: 0.5, roughness: 0.8 });
+    const matDangling = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0x111111, emissiveIntensity: 0.1, roughness: 0.9 });
+    const matHover = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 2.0 });
+
+    const sphereGeo = new THREE.SphereGeometry(1, 16, 16);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.2));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(1, 1, 1);
+    scene.add(dirLight);
+
+    function buildGraph() {
+      while (nodeGroup.children.length > 0) nodeGroup.remove(nodeGroup.children[0]);
+      if (linkLines) scene.remove(linkLines);
+      nodeObjects.clear();
+      labelElements.clear();
+
+      simulationData.nodes = state.nodes.map(n => ({ ...n }));
+      simulationData.links = state.links.map(l => ({ ...l }));
+
+      simulationData.nodes.forEach(node => {
+        const radius = Math.log(node.degree + 2) * 2;
+        const isDangling = node.dangling === true;
+        const material = isDangling ? matDangling : (node.degree === 0 ? matDormant : matActive);
+
+        const mesh = new THREE.Mesh(sphereGeo, material);
+        mesh.scale.setScalar(radius);
+        mesh.userData = { id: node.id, degree: node.degree, dangling: isDangling };
+
+        nodeGroup.add(mesh);
+        nodeObjects.set(node.id, mesh);
+
+        const div = document.createElement('div');
+        div.className = 'node-label';
+        div.textContent = node.id;
+        div.onclick = (e) => { e.stopPropagation(); selectNode(node.id); };
+
+        const label = new CSS2DObject(div);
+        label.position.set(0, radius + 2, 0);
+        mesh.add(label);
+        labelElements.set(node.id, div);
+      });
+
+      const lineGeo = new THREE.BufferGeometry();
+      const positions = new Float32Array(simulationData.links.length * 2 * 3);
+      lineGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+      const lineMat = new THREE.LineBasicMaterial({
+        color: 0x4A9EFF, transparent: true, opacity: 0.15,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      });
+      linkLines = new THREE.LineSegments(lineGeo, lineMat);
+      scene.add(linkLines);
+
+      if (simulation) simulation.stop();
+      simulation = forceSimulation(simulationData.nodes, 3)
+        .force("link", forceLink(simulationData.links).id(d => d.id).distance(40))
+        .force("charge", forceManyBody().strength(-150))
+        .force("center", forceCenter())
+        .on("tick", ticked);
+
+      document.getElementById('stat-nodes').textContent = state.nodes.length;
+      document.getElementById('stat-edges').textContent = state.links.length;
+    }
+
+    function ticked() {
+      simulationData.nodes.forEach(node => {
+        const mesh = nodeObjects.get(node.id);
+        if (mesh) mesh.position.set(node.x, node.y, node.z);
+      });
+
+      const positions = linkLines.geometry.attributes.position.array;
+      let i = 0;
+      simulationData.links.forEach(link => {
+        positions[i++] = link.source.x;
+        positions[i++] = link.source.y;
+        positions[i++] = link.source.z;
+        positions[i++] = link.target.x;
+        positions[i++] = link.target.y;
+        positions[i++] = link.target.z;
+      });
+      linkLines.geometry.attributes.position.needsUpdate = true;
+    }
+
+    renderer.domElement.addEventListener('mousemove', (e) => {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(nodeGroup.children);
+
+      if (intersects.length > 0) {
+        const mesh = intersects[0].object;
+        if (hoveredMesh !== mesh && state.selectedNode !== mesh.userData.id) {
+          if (hoveredMesh && state.selectedNode !== hoveredMesh.userData.id) {
+            hoveredMesh.material = hoveredMesh.userData.dangling ? matDangling : (hoveredMesh.userData.degree > 0 ? matActive : matDormant);
+            labelElements.get(hoveredMesh.userData.id).classList.remove('visible');
+          }
+          hoveredMesh = mesh;
+          mesh.material = matHover;
+          labelElements.get(mesh.userData.id).classList.add('visible');
+          document.body.style.cursor = 'pointer';
+        }
+      } else {
+        if (hoveredMesh && state.selectedNode !== hoveredMesh.userData.id) {
+          hoveredMesh.material = hoveredMesh.userData.dangling ? matDangling : (hoveredMesh.userData.degree > 0 ? matActive : matDormant);
+          labelElements.get(hoveredMesh.userData.id).classList.remove('visible');
+          hoveredMesh = null;
+        }
+        document.body.style.cursor = 'default';
+      }
+    });
+
+    renderer.domElement.addEventListener('click', () => {
+      if (hoveredMesh) selectNode(hoveredMesh.userData.id);
+      else selectNode(null);
+    });
+
+    function selectNode(nodeId) {
+      state.selectedNode = nodeId;
+      document.getElementById('stat-selected').textContent = nodeId || "None";
+
+      nodeObjects.forEach((mesh, id) => {
+        mesh.material = mesh.userData.dangling ? matDangling : (mesh.userData.degree > 0 ? matActive : matDormant);
+        labelElements.get(id).classList.remove('selected', 'visible');
+      });
+
+      const edgeColors = new Float32Array(simulationData.links.length * 2 * 3);
+      const baseColor = new THREE.Color(0x4a9eff);
+      const highColor = new THREE.Color(0xffffff);
+      const dimColor = new THREE.Color(0x222222);
+      const greyColor = new THREE.Color(0x444444);
+
+      let i = 0;
+      if (nodeId) {
+        const selectedMesh = nodeObjects.get(nodeId);
+        selectedMesh.material = matHover;
+        labelElements.get(nodeId).classList.add('selected', 'visible');
+
+        const neighbors = new Set();
+        simulationData.links.forEach(link => {
+          let sid = link.source.id || link.source;
+          let tid = link.target.id || link.target;
+          if (sid === nodeId) neighbors.add(tid);
+          if (tid === nodeId) neighbors.add(sid);
+        });
+
+        neighbors.forEach(nId => {
+          if (nodeObjects.has(nId)) {
+            nodeObjects.get(nId).material = matActive;
+            labelElements.get(nId).classList.add('visible');
+          }
+        });
+
+        simulationData.links.forEach(link => {
+          let sid = link.source.id || link.source;
+          let tid = link.target.id || link.target;
+          let isConnected = (sid === nodeId || tid === nodeId);
+          let c = dimColor;
+          if (isConnected) c = highColor;
+          else if (link.dangling) c = greyColor;
+
+          edgeColors[i++] = c.r; edgeColors[i++] = c.g; edgeColors[i++] = c.b;
+          edgeColors[i++] = c.r; edgeColors[i++] = c.g; edgeColors[i++] = c.b;
+        });
+        linkLines.geometry.setAttribute('color', new THREE.BufferAttribute(edgeColors, 3));
+        linkLines.material.vertexColors = true;
+        linkLines.material.opacity = 0.8;
+      } else {
+        // Reset base edge colors depending on dangling
+        simulationData.links.forEach(link => {
+          let c = link.dangling ? greyColor : baseColor;
+          edgeColors[i++] = c.r; edgeColors[i++] = c.g; edgeColors[i++] = c.b;
+          edgeColors[i++] = c.r; edgeColors[i++] = c.g; edgeColors[i++] = c.b;
+        });
+        linkLines.geometry.setAttribute('color', new THREE.BufferAttribute(edgeColors, 3));
+        linkLines.material.vertexColors = true;
+        linkLines.material.opacity = 0.15;
+      }
+    }
+
+    const clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      composer.render();
+      labelRenderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      composer.setSize(window.innerWidth, window.innerHeight);
+      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    async function startFlow() {
+      if (window.location.search.includes('test=1')) {
+        elIntro.style.opacity = '0';
+        setTimeout(() => elIntro.style.display = 'none', 500);
+        elLoading.classList.add('active');
+        const mockFiles = [
+          { name: 'NodeA.md', text: '[[NodeB]] [[NodeC]] [[DanglingNode]]' },
+          { name: 'NodeB.md', text: '[[NodeD|Alias]]' },
+          { name: 'NodeC.md', text: '[Link to D](./NodeD.md)' },
+          { name: 'NodeD.md', text: '[[NodeE]]' },
+          { name: 'NodeE.md', text: '[[NodeA]]' }
+        ].map(f => ({ name: f.name.replace('.md', ''), path: '/' + f.name, handle: { getFile: async () => ({ text: async () => f.text }) } }));
+        await processFiles(mockFiles);
+        buildGraph();
+        elLoading.classList.remove('active');
+        elHud.classList.remove('hidden');
+        return;
+      }
+      if (!window.showDirectoryPicker) {
+        alert("Your browser lacks the FileSystem Access API. Please use Chrome or Edge.");
+        return;
+      }
+      try {
+        const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+        elIntro.style.opacity = '0';
+        setTimeout(() => elIntro.style.display = 'none', 500);
+
+        elLoading.classList.add('active');
+        elLoadingText.textContent = "Scanning directory...";
+        const files = await scanDirectory(dirHandle);
+
+        if (files.length === 0) {
+          alert("No .md files found in this directory.");
+          elLoading.classList.remove('active');
+          elIntro.style.display = 'flex';
+          elIntro.style.opacity = '1';
+          return;
+        }
+
+        elLoadingText.textContent = `Parsing ${files.length} files...`;
+        await processFiles(files);
+
+        elLoadingText.textContent = `Building 3D Graph...`;
+        buildGraph();
+
+        elLoading.classList.remove('active');
+        elHud.classList.remove('hidden');
+
+      } catch (err) {
+        console.error(err);
+        if (err.name !== 'AbortError') alert("Error reading folder: " + err.message);
+      }
+    }
+
+    elStart.addEventListener('click', startFlow);
+    elNew.addEventListener('click', startFlow);
+
+    elReset.addEventListener('click', () => {
+      const startPos = camera.position.clone();
+      const targetPos = new THREE.Vector3(0, 0, 400);
+      const startTarget = controls.target.clone();
+      const targetTarget = new THREE.Vector3(0, 0, 0);
+      let t = 0;
+      function animateReset() {
+        t += 0.05;
+        if (t <= 1) {
+          camera.position.lerpVectors(startPos, targetPos, t);
+          controls.target.lerpVectors(startTarget, targetTarget, t);
+          requestAnimationFrame(animateReset);
+        }
+      }
+      animateReset();
+    });
+
+  </script>
+</body>
+
+</html>
